@@ -1,7 +1,7 @@
 require('util')
 
 -- geometry helpers
-local rotate_relative_position = { --const
+local rotate_relative_position = {
   [defines.direction.north] = function(x, y)
     return x, y
   end,
@@ -15,7 +15,7 @@ local rotate_relative_position = { --const
     return y, x * -1
   end,
 }
-local in_cone = { --const
+local in_cone = {
   [defines.direction.north] = function(orientation)
     if orientation >= 0.875 or orientation < 0.125 then
       return true
@@ -37,7 +37,7 @@ local in_cone = { --const
     end
   end,
 }
-local opposite = { --const
+local opposite = {
   [defines.direction.north] = defines.direction.south,
   [defines.direction.east] = defines.direction.west,
   [defines.direction.south] = defines.direction.north,
@@ -744,6 +744,10 @@ local function abort_build(train_config)
       station_config.running_builds = 0
     end
   end
+  -- unregister if there's no other pending builds
+  if not next(global.scaling_build_queue) then
+    script.on_nth_tick(5, nil)
+  end
 end
 
 local function abort_deconstruct(train_config)
@@ -762,6 +766,9 @@ local function abort_deconstruct(train_config)
   end
   -- clear from queue
   global.scaling_build_queue[train_config.builder_station_unit_number] = nil
+  if not next(global.scaling_build_queue) then
+    script.on_nth_tick(5, nil)
+  end
 end
 
 local function total_position_diff(entity_a, entity_b)
@@ -769,11 +776,12 @@ local function total_position_diff(entity_a, entity_b)
 end
 
 -- tick handler (once every 5 ticks) which is registered only while a train is constructing/deconstructing
--- now always registered to avoid multiplayer issues from conditional subscribing
 local function building_tick(event)
-  if next(global.scaling_build_queue) ~= nil return; --return if queue is empty
-
-
+  if not next(global.scaling_build_queue) then
+    script.on_nth_tick(5, nil) -- unregister if queue is empty
+    return
+  end
+  
   for i, train_config in pairs(global.scaling_build_queue) do
     local abort = false
     local train
@@ -1010,6 +1018,10 @@ local function building_tick(event)
                 -- clear the build queue
                 global.scaling_build_queue[i] = nil
 
+                -- unregister if none running
+                if not next(global.scaling_build_queue) then
+                  script.on_nth_tick(5, nil)
+                end
 
                 train_config.driver.destroy()
                 -- save burner state for next time
@@ -1446,6 +1458,10 @@ local function try_build(surface_id, force_id, station_name, station_config, sca
                 build_config.force_name = force_id
                 build_config.type = "construction"
 
+                -- attach the on_tick handler
+                if not next(global.scaling_build_queue) then
+                  script.on_nth_tick(5, building_tick)
+                end
                 -- finally, add it to the queue
                 global.scaling_build_queue[station_entity.unit_number] = build_config
 
@@ -1796,6 +1812,10 @@ local function on_train_changed_state(event)
         output_chest = output_chest,
       }
 
+      -- attach the on_tick handler
+      if not next(global.scaling_build_queue) then
+        script.on_nth_tick(5, building_tick)
+      end
       -- finally, add it to the queue
       global.scaling_build_queue[station_entity.unit_number] = build_config
 
@@ -2935,9 +2955,6 @@ local function on_init()
   global.scaling_signal_holdoff_timestamps = setmetatable({__mt__="holdoff_timestamps"}, global_tree_metatables.holdoff_timestamps)
   global.scaling_build_queue = {}
   global.scaling_burner_state = {}
-
-  --register building_tick
-  script.on_nth_tick(5, building_tick)
 end
 script.on_init(on_init)
 
@@ -2957,5 +2974,7 @@ local function on_load()
   recursive_attach(global.enabled_stations)
   recursive_attach(global.scaling_station_metrics)
   recursive_attach(global.scaling_signal_holdoff_timestamps)
+  -- register build tick
+  script.on_nth_tick(5, building_tick)
 end
 script.on_load(on_load)
